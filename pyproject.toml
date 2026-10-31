@@ -1,0 +1,30 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "fast-cluster-eval"
+version = "0.1.0"
+description = "GPU accelerated panel clustering evaluation with a CPU reference path"
+readme = "README.md"
+requires-python = ">=3.10"
+dependencies = [
+  "numpy>=1.24",
+  "scipy>=1.10",
+  "scikit-learn>=1.3",
+  "torch>=2.1",
+]
+
+[project.optional-dependencies]
+reference = ["scanpy>=1.9", "leidenalg>=0.10", "igraph>=0.10"]
+gpu = ["cudf-cu12", "cugraph-cu12"]
+dev = ["pytest>=7", "h5py>=3"]
+
+[project.scripts]
+fast-cluster-eval = "fast_cluster_eval.cli:main"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
