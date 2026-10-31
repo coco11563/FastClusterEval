@@ -12,7 +12,7 @@ def main():
     ap = argparse.ArgumentParser(description="FastClusterEval standardized batch evaluator")
     ap.add_argument("manifest", help="JSON manifest with a datasets list")
     ap.add_argument("--output", required=True, help="JSON output path")
-    ap.add_argument("--backend", default="reference", choices=["reference", "cuda_exact", "cuda_graph", "cuda_proxy"])
+    ap.add_argument("--backend", default="reference", choices=["reference", "cuda_exact", "cuda_graph", "cuda_cugraph", "cuda_proxy"])
     ap.add_argument("--device", default=None)
     ap.add_argument("--max-concurrency", type=int, default=1)
     ap.add_argument("--block", type=int, default=1024)

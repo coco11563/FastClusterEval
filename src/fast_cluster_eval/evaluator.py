@@ -45,6 +45,26 @@ def _leiden_from_graph(graph: sparse.csr_matrix, seed: int, resolution: float) -
     return np.asarray(part.membership, dtype=np.int64)
 
 
+def _cugraph_leiden_from_graph(graph: sparse.csr_matrix, seed: int, resolution: float) -> np.ndarray:
+    """Run optional GPU Leiden on a sparse weighted graph."""
+    try:
+        import cudf
+        import cugraph
+    except ImportError as e:
+        raise ImportError("cuda_cugraph requires cudf and cugraph RAPIDS packages") from e
+    coo = sparse.triu(graph, k=1).tocoo()
+    edges = cudf.DataFrame({
+        "src": coo.row.astype(np.int32),
+        "dst": coo.col.astype(np.int32),
+        "weight": coo.data.astype(np.float32),
+    })
+    g = cugraph.Graph(directed=False)
+    g.from_cudf_edgelist(edges, source="src", destination="dst", edge_attr="weight")
+    result = cugraph.leiden(g, resolution=float(resolution), random_state=int(seed))[0]
+    result = result.sort_values("vertex")
+    return np.asarray(result["partition"].to_numpy(), dtype=np.int64)
+
+
 def _scanpy_reference(x, seed: int, resolution: float, n_neighbors: int):
     import anndata as ad
     import scanpy as sc
@@ -56,7 +76,7 @@ def _scanpy_reference(x, seed: int, resolution: float, n_neighbors: int):
     return np.asarray(a.obs["leiden"].astype(int), dtype=np.int64), np.asarray(a.X)
 
 
-def evaluate(x, y_true=None, *, seeds=(0, 1, 2), backend: Literal["reference", "cuda_exact", "cuda_graph", "cuda_proxy"] = "reference",
+def evaluate(x, y_true=None, *, seeds=(0, 1, 2), backend: Literal["reference", "cuda_exact", "cuda_graph", "cuda_cugraph", "cuda_proxy"] = "reference",
              n_neighbors: int = 15, resolution: float = 1.0, device: str | None = None,
              block: int = 1024, si_block: int = 1024) -> list[EvaluationResult]:
     """Evaluate one panel matrix.
@@ -79,7 +99,9 @@ def evaluate(x, y_true=None, *, seeds=(0, 1, 2), backend: Literal["reference", "
         else:
             z = normalize_log1p(panel_matrix(arr, device=device), target_sum=1e4)
             graph = gpu_umap_graph(z, n_neighbors=n_neighbors, block=block)
-            pred = _leiden_from_graph(graph, seed, resolution)
+            pred = (_cugraph_leiden_from_graph(graph, seed, resolution)
+                    if backend == "cuda_cugraph"
+                    else _leiden_from_graph(graph, seed, resolution))
             evaluated = z.detach().cpu().numpy()
         m = metrics(y_true, pred, evaluated, device=device if backend != "reference" else None,
                      backend="cuda" if backend != "reference" else "cpu", si_block=si_block) if y_true is not None else {}

@@ -89,7 +89,7 @@ def main():
     ap = argparse.ArgumentParser(description="Run a resident FastClusterEval GPU service")
     ap.add_argument("--host", default="127.0.0.1")
     ap.add_argument("--port", type=int, default=8765)
-    ap.add_argument("--backend", choices=["reference", "cuda_exact", "cuda_graph", "cuda_proxy"], default="cuda_exact")
+    ap.add_argument("--backend", choices=["reference", "cuda_exact", "cuda_graph", "cuda_cugraph", "cuda_proxy"], default="cuda_exact")
     ap.add_argument("--device", default=None)
     ap.add_argument("--max-concurrency", type=int, default=1)
     ap.add_argument("--block", type=int, default=1024)

@@ -191,7 +191,9 @@ server.
 Use `cuda_graph` for high-throughput candidate screening. Its Leiden partition
 can differ from the CPU reference because GPU kNN ties and graph construction
 can differ. Send finalists to `cuda_exact` for NMI/ARI/SI values aligned with
-the reference evaluator.
+the reference evaluator. `cuda_cugraph` is an optional RAPIDS backend that
+moves Leiden to GPU as well; it must pass a partition/metric parity report
+before being used for teacher targets.
 
 Example tunnels from a local client:
 
@@ -263,7 +265,8 @@ this is the consistency mode. `cuda_graph` does normalization and blockwise
 kNN on CUDA, then uses the same Leiden package on the resulting graph. Because
 GPU kNN can make different tie/neighbor choices, `cuda_graph` is a fast
 screening mode until its partition parity has been demonstrated on a target
-dataset.
+dataset. `cuda_cugraph` uses optional RAPIDS/cuGraph GPU Leiden and is a
+throughput mode with the same parity requirement.
 
 The metric kernels include NMI and ARI from a contingency matrix and a
 blockwise Euclidean silhouette implementation. The blockwise implementation
