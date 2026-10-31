@@ -175,6 +175,88 @@ The resident service returns one dataset result for `/v1/evaluate` and a
 standard batch object for `/v1/evaluate_batch`. Undefined silhouette values are
 serialized as JSON `null`, never as non-standard `NaN`.
 
+## Current remote GPU pool
+
+The services bind to localhost on each server. Use an SSH tunnel from the
+client machine, or call `127.0.0.1` directly when the agent runs on that
+server.
+
+| Server | Port | GPU role | Backend | Concurrency |
+|---|---:|---|---|---:|
+| `gpu_pub` | 8765 | A800 GPU0, limited free memory | `cuda_exact` | 2 |
+| `gpu_pub` | 8773–8776 | A800 GPU0–3, shared slots | `cuda_graph` | 1 each |
+| `gpu17` | 8766 | A100 GPU0 | `cuda_exact` | 2 |
+| `gpu17` | 8767–8772 | A100 GPU1,2,3,4,5,7 | `cuda_graph` | 4 each |
+
+Use `cuda_graph` for high-throughput candidate screening. Its Leiden partition
+can differ from the CPU reference because GPU kNN ties and graph construction
+can differ. Send finalists to `cuda_exact` for NMI/ARI/SI values aligned with
+the reference evaluator.
+
+Example tunnels from a local client:
+
+```bash
+ssh -N -L 18765:127.0.0.1:8765 gpu_pub
+ssh -N -L 18767:127.0.0.1:8767 gpu17
+ssh -N -L 18768:127.0.0.1:8768 gpu17
+ssh -N -L 18766:127.0.0.1:8766 gpu17
+```
+
+Check a service before sending work:
+
+```bash
+curl http://127.0.0.1:18767/health
+```
+
+The matrix path in an API request is resolved on the **server**, so large
+matrices should first be placed on the target server as `.npy`, `.npz`, or
+`.h5ad`. Nested JSON matrices are intended only for small smoke tests.
+
+Example exact request:
+
+```bash
+curl -X POST http://127.0.0.1:18766/v1/evaluate \
+  -H 'Content-Type: application/json' \
+  -d '{
+    "dataset_id": "study_A",
+    "matrix": "/data/eval/study_A.npy",
+    "truth_labels": "/data/eval/study_A_labels.npy",
+    "selected_matrix_indices": {
+      "teacher_64": [0, 4, 9, 12],
+      "hvg_64": [1, 3, 8, 11]
+    },
+    "metrics": ["NMI", "ARI", "SI"],
+    "seeds": [0, 1, 2]
+  }'
+```
+
+For a Python client, distribute screening requests round-robin across the
+`gpu17` graph ports and send only selected finalists to the exact port:
+
+```python
+import itertools
+import requests
+
+GRAPH = itertools.cycle([
+    "http://127.0.0.1:18767",
+    "http://127.0.0.1:18768",
+])
+EXACT = "http://127.0.0.1:18766"
+
+def screen(request_body):
+    return requests.post(next(GRAPH) + "/v1/evaluate", json={
+        **request_body, "backend": "cuda_graph"
+    }, timeout=1800).json()
+
+def verify(request_body):
+    return requests.post(EXACT + "/v1/evaluate", json={
+        **request_body, "backend": "cuda_exact"
+    }, timeout=1800).json()
+```
+
+Do not send RiGPS benchmark data to these remote services. Use them for DISCO
+teacher/validation inputs or other explicitly permitted datasets.
+
 `reference` runs normalization, kNN and Leiden through Scanpy. `cuda_exact`
 keeps those exact reference labels and runs the NMI/ARI/SI kernels on CUDA;
 this is the consistency mode. `cuda_graph` does normalization and blockwise
