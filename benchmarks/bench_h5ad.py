@@ -12,7 +12,7 @@ def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("h5ad")
     ap.add_argument("--genes", type=int, default=32)
-    ap.add_argument("--backend", action="append", default=["reference", "cuda_exact", "cuda_graph", "cuda_cugraph"])
+    ap.add_argument("--backend", action="append", default=None)
     ap.add_argument("--cugraph-resolution", type=float, default=None)
     a = ap.parse_args()
     A = ad.read_h5ad(a.h5ad)
@@ -20,7 +20,8 @@ def main():
     X = np.asarray(X.toarray() if hasattr(X, "toarray") else X, dtype="float32")
     y = A.obs["major"].astype("category").cat.codes.to_numpy()
     reference_labels = None
-    for backend in dict.fromkeys(a.backend):
+    backends = a.backend or ["reference", "cuda_exact", "cuda_graph", "cuda_cugraph"]
+    for backend in dict.fromkeys(backends):
         t = time.perf_counter()
         try:
             r = evaluate(X, y, seeds=(0,), backend=backend, device="cuda", block=512, si_block=512,
