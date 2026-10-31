@@ -104,10 +104,12 @@ def gpu_umap_graph(x: torch.Tensor, n_neighbors: int = 15, *, block: int = 1024,
         lo = torch.where(val > target, lo, mid)
     sigma = ((lo + hi) * 0.5).clamp_min(1e-6)
     weight = torch.exp(-(dist - rho).clamp_min(0) / sigma)
+    weight = torch.nan_to_num(weight, nan=0.0, posinf=1.0, neginf=0.0)
     r = torch.arange(x.shape[0], device=x.device).unsqueeze(1).expand_as(idx)
     r = r.reshape(-1).cpu().numpy()
     c = idx.reshape(-1).cpu().numpy()
     w = weight.reshape(-1).cpu().numpy().astype(np.float32)
+    w = np.nan_to_num(w, nan=0.0, posinf=1.0, neginf=0.0)
     a = sparse.coo_matrix((w, (r, c)), shape=(x.shape[0], x.shape[0])).tocsr()
     return a.maximum(a.T)
 
