@@ -32,6 +32,34 @@ The local 4090 validation environment uses the repository-managed `.venv`.
 It reuses the existing CUDA PyTorch/Scanpy wheels through a local
 site-packages link, avoiding a second multi-gigabyte PyTorch installation.
 
+## Quick start for another agent
+
+```bash
+git clone git@github.com:coco11563/FastClusterEval.git
+cd FastClusterEval
+python3 -m venv .venv
+source .venv/bin/activate
+python -m pip install -e ".[reference,dev]"
+```
+
+The matrix convention is **cells × genes**. `truth_labels` has one entry per
+cell. `selected_matrix_indices` is zero-based and refers to gene columns. A
+single panel can be a list; multiple panels should be a mapping from panel ID
+to index list.
+
+Run the local tests first:
+
+```bash
+python -m pytest -q
+```
+
+For a CUDA host, verify the device before benchmarking:
+
+```bash
+python -c "import torch; print(torch.cuda.is_available(), torch.cuda.get_device_name(0))"
+python benchmarks/bench_4090.py
+```
+
 ## API
 
 ```python
@@ -82,6 +110,26 @@ fast-cluster-eval manifest.json \
   --max-concurrency 2
 ```
 
+The referenced `.npy`, `.npz`, `.csv`, `.tsv`, or `.h5ad` paths are resolved
+relative to the manifest file. A minimal manifest can therefore be generated
+without embedding large matrices in JSON:
+
+```json
+{
+  "schema_version": "1.0",
+  "datasets": [
+    {
+      "dataset_id": "study_A",
+      "matrix": "data/study_A.npy",
+      "truth_labels": "data/study_A_labels.npy",
+      "selected_matrix_indices": {"panel_64": [0, 2, 5, 9]},
+      "metrics": ["NMI", "ARI", "SI"],
+      "seeds": [0, 1, 2]
+    }
+  ]
+}
+```
+
 The output is always JSON-compatible and contains one atomic result object per
 `dataset_id`. A failed dataset is recorded with `status: "error"` while other
 datasets remain usable. Each panel contains aggregate metrics and per-seed
@@ -108,6 +156,24 @@ object from the batch schema. For large matrices, use a server-local `.npy`,
 `.npz`, or `.h5ad` path in `matrix` instead of sending nested JSON arrays.
 Keep the service bound to localhost and use an SSH tunnel for remote access
 unless the network is explicitly trusted.
+
+For a remote service on `gpu_pub`:
+
+```bash
+ssh -N -L 8765:127.0.0.1:8765 gpu_pub
+curl http://127.0.0.1:8765/health
+```
+
+For a remote service on `gpu17` using its A100 GPU:
+
+```bash
+ssh -N -L 8766:127.0.0.1:8766 gpu17
+curl http://127.0.0.1:8766/health
+```
+
+The resident service returns one dataset result for `/v1/evaluate` and a
+standard batch object for `/v1/evaluate_batch`. Undefined silhouette values are
+serialized as JSON `null`, never as non-standard `NaN`.
 
 `reference` runs normalization, kNN and Leiden through Scanpy. `cuda_exact`
 keeps those exact reference labels and runs the NMI/ARI/SI kernels on CUDA;
