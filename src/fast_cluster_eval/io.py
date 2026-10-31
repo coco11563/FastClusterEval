@@ -79,6 +79,10 @@ def request_from_dict(d: dict[str, Any], base_dir: str | Path = ".") -> DatasetI
     base = Path(base_dir)
     matrix = load_array(d["matrix"] if not isinstance(d["matrix"], str) else base / d["matrix"])
     truth = load_array(d["truth_labels"] if not isinstance(d["truth_labels"], str) else base / d["truth_labels"])
+    if not hasattr(matrix, "shape"):
+        matrix = np.asarray(matrix)
+    if not hasattr(truth, "shape"):
+        truth = np.asarray(truth)
     return DatasetInput(
         dataset_id=str(d["dataset_id"]),
         matrix=matrix,

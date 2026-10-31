@@ -19,9 +19,11 @@ dependencies = [
 reference = ["scanpy>=1.9", "leidenalg>=0.10", "igraph>=0.10"]
 gpu = ["cudf-cu12", "cugraph-cu12"]
 dev = ["pytest>=7", "h5py>=3"]
+server = ["fastapi>=0.110", "uvicorn[standard]>=0.27"]
 
 [project.scripts]
 fast-cluster-eval = "fast_cluster_eval.cli:main"
+fast-cluster-eval-server = "fast_cluster_eval.server:main"
 
 [tool.setuptools.packages.find]
 where = ["src"]

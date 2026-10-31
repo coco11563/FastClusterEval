@@ -91,6 +91,24 @@ For CUDA, set `max-concurrency` from available VRAM. Dataset-level concurrency
 is intentionally explicit; unbounded panel-level concurrency causes memory
 fragmentation and makes timing less reproducible.
 
+## Resident GPU service
+
+The evaluator can run as one long-lived GPU process. This keeps the CUDA
+context and allocator warm across requests:
+
+```bash
+pip install -e ".[reference,server]"
+fast-cluster-eval-server --host 127.0.0.1 --port 8765 \
+  --backend cuda_exact --device cuda --max-concurrency 2
+```
+
+The service exposes `GET /health`, `POST /v1/evaluate`, and
+`POST /v1/evaluate_batch`. The request body of `/v1/evaluate` is one dataset
+object from the batch schema. For large matrices, use a server-local `.npy`,
+`.npz`, or `.h5ad` path in `matrix` instead of sending nested JSON arrays.
+Keep the service bound to localhost and use an SSH tunnel for remote access
+unless the network is explicitly trusted.
+
 `reference` runs normalization, kNN and Leiden through Scanpy. `cuda_exact`
 keeps those exact reference labels and runs the NMI/ARI/SI kernels on CUDA;
 this is the consistency mode. `cuda_graph` does normalization and blockwise

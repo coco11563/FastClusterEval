@@ -6,11 +6,17 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import asdict
 from typing import Iterable
 import time
+import math
 
 import numpy as np
 
 from .evaluator import evaluate
 from .io import DatasetInput, SCHEMA_VERSION
+
+
+def _json_number(value):
+    value = float(value)
+    return value if math.isfinite(value) else None
 
 
 def _one(req: DatasetInput, *, backend, device, block, si_block) -> dict:
@@ -28,14 +34,14 @@ def _one(req: DatasetInput, *, backend, device, block, si_block) -> dict:
             for r in result:
                 rows.append({
                     "seed": r.seed,
-                    "metrics": {k: float(v) for k, v in r.metrics.items() if k in req.metrics},
+                    "metrics": {k: _json_number(v) for k, v in r.metrics.items() if k in req.metrics},
                     "seconds": float(r.seconds),
                     "backend": r.backend,
                 })
-            aggregate = {
-                k: float(np.nanmean([row["metrics"].get(k, np.nan) for row in rows]))
-                for k in req.metrics
-            }
+            aggregate = {}
+            for k in req.metrics:
+                vals = [row["metrics"].get(k) for row in rows if row["metrics"].get(k) is not None]
+                aggregate[k] = float(np.mean(vals)) if vals else None
             panels.append({
                 "panel_id": panel_id,
                 "selected_matrix_indices": indices,
