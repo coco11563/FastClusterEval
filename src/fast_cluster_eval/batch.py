@@ -23,10 +23,16 @@ def _one(req: DatasetInput, *, backend, device, block, si_block, cugraph_resolut
     started = time.perf_counter()
     try:
         req.validate()
+        matrix = req.matrix
+        truth = req.truth_labels
+        if req.row_indices is not None:
+            rows = np.asarray(req.row_indices, dtype=np.int64)
+            matrix = matrix[rows]
+            truth = np.asarray(truth)[rows]
         panels = []
         for panel_id, indices in req.panels().items():
             result = evaluate(
-                req.matrix[:, indices], req.truth_labels,
+                matrix[:, indices], truth,
                 seeds=req.seeds, backend=backend, device=device,
                 block=block, si_block=si_block, cugraph_resolution=cugraph_resolution,
             )
@@ -51,7 +57,7 @@ def _one(req: DatasetInput, *, backend, device, block, si_block, cugraph_resolut
         return {
             "dataset_id": req.dataset_id,
             "status": "ok",
-            "shape": [int(req.matrix.shape[0]), int(req.matrix.shape[1])],
+            "shape": [int(matrix.shape[0]), int(matrix.shape[1])],
             "panels": panels,
             "metadata": req.metadata,
             "seconds": float(time.perf_counter() - started),

@@ -22,6 +22,17 @@ def test_dataset_failure_is_atomic():
     assert out["summary"] == {"count": 2, "ok": 1, "error": 1}
 
 
+def test_row_view_evaluates_only_selected_cells():
+    rng = np.random.default_rng(12)
+    x = rng.poisson(1.0, (80, 12)).astype(np.float32)
+    y = np.repeat(np.arange(4), 20)
+    rows = np.arange(0, 80, 2)
+    req = DatasetInput("view", x, y, {"p": [0, 1, 2]}, row_indices=rows, seeds=(0,))
+    out = evaluate_batch([req], backend="reference", max_concurrency=1)
+    assert out["summary"] == {"count": 1, "ok": 1, "error": 0}
+    assert out["datasets"][0]["shape"] == [40, 12]
+
+
 def test_cuda_exact_matches_reference_if_available():
     import torch
     if not torch.cuda.is_available():

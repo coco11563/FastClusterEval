@@ -28,6 +28,7 @@ class DatasetInput:
     matrix: Any
     truth_labels: Any
     selected_matrix_indices: Any
+    row_indices: Any = None
     metrics: tuple[str, ...] = VALID_METRICS
     seeds: tuple[int, ...] = (0, 1, 2)
     metadata: dict[str, Any] = field(default_factory=dict)
@@ -43,12 +44,18 @@ class DatasetInput:
             raise ValueError(f"{self.dataset_id}: unsupported metrics {sorted(invalid)}")
         p = _panels(self.selected_matrix_indices)
         g = int(self.matrix.shape[1])
+        if self.row_indices is not None:
+            rows = np.asarray(self.row_indices, dtype=np.int64).reshape(-1)
+            if rows.size and (rows.min() < 0 or rows.max() >= n):
+                raise ValueError(f"{self.dataset_id}: row_indices outside [0, {n})")
+            if len(np.unique(rows)) != len(rows):
+                raise ValueError(f"{self.dataset_id}: row_indices contain duplicates")
         for name, indices in p.items():
             if not indices:
                 raise ValueError(f"{self.dataset_id}/{name}: selected panel is empty")
             if min(indices) < 0 or max(indices) >= g:
                 raise ValueError(f"{self.dataset_id}/{name}: selected matrix index outside [0, {g})")
-            if len(set(indices)) != len(indices):
+            if len(set(indices)) != len(indices) and not self.metadata.get("allow_duplicate_indices", False):
                 raise ValueError(f"{self.dataset_id}/{name}: selected matrix indices contain duplicates")
         return self
 
@@ -79,6 +86,7 @@ def request_from_dict(d: dict[str, Any], base_dir: str | Path = ".") -> DatasetI
     base = Path(base_dir)
     matrix = load_array(d["matrix"] if not isinstance(d["matrix"], str) else base / d["matrix"])
     truth = load_array(d["truth_labels"] if not isinstance(d["truth_labels"], str) else base / d["truth_labels"])
+    rows = load_array(d["row_indices"] if not isinstance(d.get("row_indices"), str) else base / d["row_indices"]) if d.get("row_indices") is not None else None
     if not hasattr(matrix, "shape"):
         matrix = np.asarray(matrix)
     if not hasattr(truth, "shape"):
@@ -88,6 +96,7 @@ def request_from_dict(d: dict[str, Any], base_dir: str | Path = ".") -> DatasetI
         matrix=matrix,
         truth_labels=truth,
         selected_matrix_indices=d["selected_matrix_indices"],
+        row_indices=rows,
         metrics=tuple(d.get("metrics", VALID_METRICS)),
         seeds=tuple(int(x) for x in d.get("seeds", (0, 1, 2))),
         metadata=dict(d.get("metadata", {})),

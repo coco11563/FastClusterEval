@@ -110,6 +110,7 @@ contains the matrix, truth labels and one or more selected-panel index lists:
         "teacher_64": [0, 4, 9, 12],
         "hvg_64": [1, 3, 8, 11]
       },
+      "row_indices": "sample_001_rows_D.npy",
       "metrics": ["NMI", "ARI", "SI"],
       "seeds": [0, 1, 2]
     }
@@ -151,6 +152,11 @@ The output is always JSON-compatible and contains one atomic result object per
 `dataset_id`. A failed dataset is recorded with `status: "error"` while other
 datasets remain usable. Each panel contains aggregate metrics and per-seed
 metrics, preserving the selected matrix indices used for the calculation.
+
+`row_indices` is optional. When present, the service evaluates only the
+specified cells while keeping matrix column indices unchanged. The teacher
+uses this for selection and audit views (D/A) without creating a separate
+matrix for every panel.
 
 For CUDA, set `max-concurrency` from available VRAM. Dataset-level concurrency
 is intentionally explicit; unbounded panel-level concurrency causes memory
