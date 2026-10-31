@@ -69,7 +69,10 @@ def _scanpy_reference(x, seed: int, resolution: float, n_neighbors: int):
     import anndata as ad
     import scanpy as sc
     a = ad.AnnData(np.asarray(x, dtype=np.float64))
-    sc.pp.normalize_total(a, target_sum=1e4)
+    # Keep the project reference protocol: normalize_total with Scanpy's
+    # default median library size.  A fixed 1e4 target changes the panel
+    # representation and invalidates parity with datagen_v3.evaluator.
+    sc.pp.normalize_total(a)
     sc.pp.log1p(a)
     sc.pp.neighbors(a, n_neighbors=n_neighbors, metric="euclidean", random_state=seed, use_rep="X")
     sc.tl.leiden(a, resolution=resolution, random_state=seed, flavor="leidenalg", directed=False, n_iterations=-1)
@@ -77,8 +80,8 @@ def _scanpy_reference(x, seed: int, resolution: float, n_neighbors: int):
 
 
 def evaluate(x, y_true=None, *, seeds=(0, 1, 2), backend: Literal["reference", "cuda_exact", "cuda_graph", "cuda_cugraph", "cuda_proxy"] = "reference",
-             n_neighbors: int = 15, resolution: float = 1.0, device: str | None = None,
-             block: int = 1024, si_block: int = 1024) -> list[EvaluationResult]:
+             n_neighbors: int = 15, resolution: float = 1.0, cugraph_resolution: float | None = None,
+             device: str | None = None, block: int = 1024, si_block: int = 1024) -> list[EvaluationResult]:
     """Evaluate one panel matrix.
 
     ``reference`` uses the current Scanpy/Leiden protocol. ``cuda_exact``
@@ -86,6 +89,8 @@ def evaluate(x, y_true=None, *, seeds=(0, 1, 2), backend: Literal["reference", "
     moves normalization and kNN graph construction to CUDA, then runs Leiden
     on the resulting graph; it is a fast screening path because GPU kNN can
     make different tie/neighbor choices. ``cuda_proxy`` aliases ``cuda_graph``.
+    ``cugraph_resolution`` is separate because cuGraph and Scanpy/leidenalg
+    can produce different partitions for the same nominal resolution.
     """
     import time
     arr = x.toarray() if hasattr(x, "toarray") else (x.values if hasattr(x, "values") else np.asarray(x))
@@ -99,7 +104,8 @@ def evaluate(x, y_true=None, *, seeds=(0, 1, 2), backend: Literal["reference", "
         else:
             z = normalize_log1p(panel_matrix(arr, device=device), target_sum=1e4)
             graph = gpu_umap_graph(z, n_neighbors=n_neighbors, block=block)
-            pred = (_cugraph_leiden_from_graph(graph, seed, resolution)
+            graph_resolution = resolution if cugraph_resolution is None else cugraph_resolution
+            pred = (_cugraph_leiden_from_graph(graph, seed, graph_resolution)
                     if backend == "cuda_cugraph"
                     else _leiden_from_graph(graph, seed, resolution))
             evaluated = z.detach().cpu().numpy()

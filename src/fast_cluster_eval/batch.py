@@ -19,7 +19,7 @@ def _json_number(value):
     return value if math.isfinite(value) else None
 
 
-def _one(req: DatasetInput, *, backend, device, block, si_block) -> dict:
+def _one(req: DatasetInput, *, backend, device, block, si_block, cugraph_resolution) -> dict:
     started = time.perf_counter()
     try:
         req.validate()
@@ -28,7 +28,7 @@ def _one(req: DatasetInput, *, backend, device, block, si_block) -> dict:
             result = evaluate(
                 req.matrix[:, indices], req.truth_labels,
                 seeds=req.seeds, backend=backend, device=device,
-                block=block, si_block=si_block,
+                block=block, si_block=si_block, cugraph_resolution=cugraph_resolution,
             )
             rows = []
             for r in result:
@@ -69,7 +69,8 @@ def _one(req: DatasetInput, *, backend, device, block, si_block) -> dict:
 
 
 def evaluate_batch(requests: Iterable[DatasetInput], *, backend="reference", device=None,
-                   max_concurrency: int = 1, block: int = 1024, si_block: int = 1024) -> dict:
+                   max_concurrency: int = 1, block: int = 1024, si_block: int = 1024,
+                   cugraph_resolution: float | None = None) -> dict:
     """Evaluate many datasets concurrently and commit one result per dataset.
 
     CUDA work is safe to parallelize at the dataset boundary, but callers
@@ -82,11 +83,13 @@ def evaluate_batch(requests: Iterable[DatasetInput], *, backend="reference", dev
     results = [None] * len(reqs)
     if max_concurrency == 1:
         for i, req in enumerate(reqs):
-            results[i] = _one(req, backend=backend, device=device, block=block, si_block=si_block)
+            results[i] = _one(req, backend=backend, device=device, block=block, si_block=si_block,
+                              cugraph_resolution=cugraph_resolution)
     else:
         with ThreadPoolExecutor(max_workers=max_concurrency, thread_name_prefix="fce") as pool:
             futures = {
-                pool.submit(_one, req, backend=backend, device=device, block=block, si_block=si_block): i
+                pool.submit(_one, req, backend=backend, device=device, block=block, si_block=si_block,
+                            cugraph_resolution=cugraph_resolution): i
                 for i, req in enumerate(reqs)
             }
             for future in as_completed(futures):

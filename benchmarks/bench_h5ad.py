@@ -13,6 +13,7 @@ def main():
     ap.add_argument("h5ad")
     ap.add_argument("--genes", type=int, default=32)
     ap.add_argument("--backend", action="append", default=["reference", "cuda_exact", "cuda_graph", "cuda_cugraph"])
+    ap.add_argument("--cugraph-resolution", type=float, default=None)
     a = ap.parse_args()
     A = ad.read_h5ad(a.h5ad)
     X = A.X[:, :a.genes]
@@ -22,7 +23,8 @@ def main():
     for backend in dict.fromkeys(a.backend):
         t = time.perf_counter()
         try:
-            r = evaluate(X, y, seeds=(0,), backend=backend, device="cuda", block=512, si_block=512)[0]
+            r = evaluate(X, y, seeds=(0,), backend=backend, device="cuda", block=512, si_block=512,
+                         cugraph_resolution=a.cugraph_resolution)[0]
             extra = {}
             if backend == "reference":
                 reference_labels = r.labels

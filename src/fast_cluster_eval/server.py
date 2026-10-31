@@ -49,6 +49,7 @@ def create_app(*, backend: str = "cuda_exact", device: str | None = None,
                     evaluate_batch, [req], backend=payload.get("backend", backend),
                     device=payload.get("device", device), max_concurrency=1,
                     block=int(payload.get("block", block)), si_block=int(payload.get("si_block", si_block)),
+                    cugraph_resolution=payload.get("cugraph_resolution"),
                 )
                 return result["datasets"][0]
             except Exception as exc:
@@ -73,6 +74,7 @@ def create_app(*, backend: str = "cuda_exact", device: str | None = None,
                         device=payload.get("device", device),
                         max_concurrency=int(payload.get("dataset_concurrency", 1)),
                         block=int(payload.get("block", block)), si_block=int(payload.get("si_block", si_block)),
+                        cugraph_resolution=payload.get("cugraph_resolution"),
                     )
                 finally:
                     state["active"] -= 1

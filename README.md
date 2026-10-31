@@ -32,6 +32,23 @@ The local 4090 validation environment uses the repository-managed `.venv`.
 It reuses the existing CUDA PyTorch/Scanpy wheels through a local
 site-packages link, avoiding a second multi-gigabyte PyTorch installation.
 
+### Isolated RAPIDS environment on gpu17
+
+The validated remote RAPIDS environment is kept separate from the training
+environment at `/home/xiaomeng/FastClusterEval/rapids-venv`. It uses Python
+3.11, `cudf-cu12==25.10.0`, `cugraph-cu12==25.10.1`, and
+`cupy-cuda12x==14.2.0`. Use its `bin/rapids-python` wrapper; it preloads the
+RAPIDS CUDA libraries before PyTorch to avoid a cuBLAS ABI collision.
+
+```bash
+/home/xiaomeng/FastClusterEval/rapids-venv/bin/rapids-python -c \
+  'import torch, cudf, cugraph; print(torch.cuda.is_available(), cudf.__version__, cugraph.__version__)'
+```
+
+The wrapper currently reports eight A100 devices. This environment is for
+cuGraph validation and GPU screening; reference-aligned final scores still use
+`cuda_exact`.
+
 ## Quick start for another agent
 
 ```bash
@@ -194,6 +211,12 @@ can differ. Send finalists to `cuda_exact` for NMI/ARI/SI values aligned with
 the reference evaluator. `cuda_cugraph` is an optional RAPIDS backend that
 moves Leiden to GPU as well; it must pass a partition/metric parity report
 before being used for teacher targets.
+
+cuGraph's Leiden resolution is exposed separately as `cugraph_resolution` in
+the Python, CLI, batch, and HTTP APIs. The Scanpy/leidenalg resolution is not
+guaranteed to map numerically to cuGraph on a fuzzy kNN graph. Treat this
+backend as a GPU screening path until a representative calibration report
+has been recorded; use `cuda_exact` for reference-aligned final scores.
 
 Example tunnels from a local client:
 
