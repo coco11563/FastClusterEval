@@ -8,3 +8,4 @@ build/
 benchmarks/results/
 data/
 outputs/
+FastClusterEval.tar.gz
