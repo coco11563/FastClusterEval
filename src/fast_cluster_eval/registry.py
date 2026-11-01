@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+import hashlib
 from pathlib import Path
 from typing import Any
 
@@ -53,6 +54,37 @@ class DatasetRegistry:
             return self._records[dataset_id]
         except KeyError as exc:
             raise KeyError(f"dataset is not registered: {dataset_id}") from exc
+
+    def register_view(self, dataset_id: str, view_id: str, row_indices: Any) -> dict[str, Any]:
+        record = self.get(dataset_id)
+        rows = np.asarray(load_array(row_indices), dtype=np.int64).reshape(-1)
+        if rows.size and (rows.min() < 0 or rows.max() >= record.matrix.shape[0]):
+            raise ValueError(f"{dataset_id}/{view_id}: row_indices outside dataset bounds")
+        if len(np.unique(rows)) != len(rows):
+            raise ValueError(f"{dataset_id}/{view_id}: row_indices contain duplicates")
+        record.rows[str(view_id)] = rows
+        return {
+            "dataset_id": dataset_id,
+            "view_id": str(view_id),
+            "n_rows": int(rows.size),
+            "row_hash": hashlib.sha256(rows.tobytes()).hexdigest(),
+        }
+
+    def view_rows(self, dataset_id: str, view_id: str) -> np.ndarray:
+        record = self.get(dataset_id)
+        key = str(view_id)
+        rows = record.rows.get(key)
+        if rows is None:
+            try:
+                rows = np.asarray(load_array(key), dtype=np.int64).reshape(-1)
+            except Exception as exc:
+                raise KeyError(f"view is not registered: {dataset_id}/{view_id}") from exc
+            if rows.size and (rows.min() < 0 or rows.max() >= record.matrix.shape[0]):
+                raise ValueError(f"{dataset_id}/{view_id}: row_indices outside dataset bounds")
+            if len(np.unique(rows)) != len(rows):
+                raise ValueError(f"{dataset_id}/{view_id}: row_indices contain duplicates")
+            record.rows[key] = rows
+        return rows
 
     def view(self, dataset_id: str, row_indices: Any = None) -> tuple[Any, np.ndarray]:
         record = self.get(dataset_id)

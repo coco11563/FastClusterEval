@@ -3,12 +3,38 @@
 from __future__ import annotations
 
 import asyncio
+import hashlib
 import time
 from typing import Any
 
+import numpy as np
+
 from .batch import evaluate_batch
+from .evaluator import evaluate
 from .io import DatasetInput, request_from_dict
+from .metrics import metrics
 from .registry import DatasetRegistry
+
+
+def _json_number(value):
+    value = float(value)
+    return value if value == value and abs(value) != float("inf") else None
+
+
+def _metric_rows(results, metrics_requested):
+    rows = []
+    for result in results:
+        rows.append({
+            "seed": int(result.seed),
+            "metrics": {k: _json_number(result.metrics.get(k)) for k in metrics_requested},
+            "seconds": float(result.seconds),
+            "backend": result.backend,
+        })
+    aggregate = {}
+    for key in metrics_requested:
+        vals = [row["metrics"].get(key) for row in rows if row["metrics"].get(key) is not None]
+        aggregate[key] = float(sum(vals) / len(vals)) if vals else None
+    return aggregate, rows
 
 
 def create_app(*, backend: str = "cuda_exact", device: str | None = None,
@@ -46,6 +72,15 @@ def create_app(*, backend: str = "cuda_exact", device: str | None = None,
         try:
             record = await asyncio.to_thread(registry.register, payload)
             return registry.info(record.dataset_id)
+        except Exception as exc:
+            raise HTTPException(status_code=400, detail={"type": type(exc).__name__, "message": str(exc)}) from exc
+
+    @app.post("/v2/datasets/{dataset_id}/views/register")
+    async def register_view(dataset_id: str, payload: dict[str, Any]):
+        try:
+            return await asyncio.to_thread(
+                registry.register_view, dataset_id, str(payload["view_id"]), payload["row_indices"]
+            )
         except Exception as exc:
             raise HTTPException(status_code=400, detail={"type": type(exc).__name__, "message": str(exc)}) from exc
 
@@ -137,6 +172,112 @@ def create_app(*, backend: str = "cuda_exact", device: str | None = None,
                 finally:
                     state["active"] -= 1
             return {"dataset_id": dataset_id, "backend": payload.get("backend", backend), "views": results}
+        except Exception as exc:
+            raise HTTPException(status_code=400, detail={"type": type(exc).__name__, "message": str(exc)}) from exc
+
+    @app.post("/v2/teacher/step/screen")
+    @app.post("/v2/teacher/step/verify")
+    async def evaluate_teacher_step_v2(payload: dict[str, Any]):
+        """Evaluate one incremental teacher step.
+
+        A view is clustered once. Optional projections are scored using the
+        resulting partition, matching the teacher's audit-half protocol.
+        The controller decides which repetitions are new; this endpoint never
+        expands a request into repetitions that were not supplied.
+        """
+        try:
+            dataset_id = str(payload["dataset_id"])
+            panels = payload["selected_matrix_indices"]
+            views = payload.get("views") or {"full": {}}
+            requested_metrics = tuple(payload.get("metrics", ("NMI", "ARI", "SI")))
+            seeds = tuple(int(x) for x in payload.get("seeds", (0, 1, 2)))
+            selected_backend = payload.get("backend", backend)
+            result_views = {}
+            started = time.perf_counter()
+            async with semaphore:
+                state["requests"] += 1
+                state["active"] += 1
+                try:
+                    for view_id, spec in views.items():
+                        spec = spec if isinstance(spec, dict) else {"row_indices": spec}
+                        if "view_id" in spec:
+                            rows = registry.view_rows(dataset_id, str(spec["view_id"]))
+                        else:
+                            rows = spec.get("row_indices")
+                        matrix, truth = registry.view(dataset_id, rows)
+                        projections = spec.get("projections", {})
+                        view_seeds = tuple(int(x) for x in spec.get("seeds", seeds))
+                        view_started = time.perf_counter()
+                        panel_results = []
+                        for panel_id, indices in DatasetInput(
+                            dataset_id=f"{dataset_id}:{view_id}",
+                            matrix=matrix,
+                                truth_labels=truth,
+                            selected_matrix_indices=panels,
+                            metrics=requested_metrics,
+                                seeds=view_seeds,
+                        ).panels().items():
+                            evaluated = evaluate(
+                                matrix[:, indices], truth, seeds=view_seeds,
+                                backend=selected_backend,
+                                device=payload.get("device", device),
+                                block=int(payload.get("block", block)),
+                                si_block=int(payload.get("si_block", si_block)),
+                                cugraph_resolution=payload.get("cugraph_resolution"),
+                            )
+                            aggregate, seed_rows = _metric_rows(evaluated, requested_metrics)
+                            projection_rows = {}
+                            for projection_id, projection_spec in projections.items():
+                                projection_spec = projection_spec if isinstance(projection_spec, dict) else {"row_indices": projection_spec}
+                                projection_indices = projection_spec.get("row_indices")
+                                if isinstance(projection_indices, str):
+                                    projection_indices = registry.view_rows(dataset_id, projection_indices)
+                                projection_indices = np.asarray(projection_indices, dtype=np.int64).reshape(-1)
+                                if projection_indices.size and (projection_indices.min() < 0 or projection_indices.max() >= len(truth)):
+                                    raise ValueError(f"{dataset_id}/{view_id}/{projection_id}: projection outside view bounds")
+                                projection_seed_rows = []
+                                for result in evaluated:
+                                    projected = metrics(
+                                        truth[projection_indices], result.labels[projection_indices],
+                                        result.evaluated[projection_indices],
+                                        device=payload.get("device", device) if selected_backend != "reference" else None,
+                                        backend="cuda" if selected_backend != "reference" else "cpu",
+                                        si_block=int(payload.get("si_block", si_block)),
+                                    )
+                                    projection_seed_rows.append({
+                                        "seed": int(result.seed),
+                                        "metrics": {k: _json_number(projected.get(k)) for k in requested_metrics},
+                                        "backend": result.backend,
+                                    })
+                                projection_aggregate = {}
+                                for key in requested_metrics:
+                                    vals = [r["metrics"].get(key) for r in projection_seed_rows if r["metrics"].get(key) is not None]
+                                    projection_aggregate[key] = float(sum(vals) / len(vals)) if vals else None
+                                projection_rows[str(projection_id)] = {
+                                    "metrics": projection_aggregate,
+                                    "seeds": projection_seed_rows,
+                                }
+                            panel_results.append({
+                                "panel_id": str(panel_id),
+                                "selected_matrix_indices": indices,
+                                "metrics": aggregate,
+                                "seeds": seed_rows,
+                                "projections": projection_rows,
+                            })
+                        result_views[str(view_id)] = {
+                            "shape": [int(matrix.shape[0]), int(matrix.shape[1])],
+                            "panels": panel_results,
+                            "seconds": float(time.perf_counter() - view_started),
+                        }
+                finally:
+                    state["active"] -= 1
+            return {
+                "schema_version": "2.0",
+                "dataset_id": dataset_id,
+                "backend": selected_backend,
+                "views": result_views,
+                "seconds": float(time.perf_counter() - started),
+            }
         except Exception as exc:
             raise HTTPException(status_code=400, detail={"type": type(exc).__name__, "message": str(exc)}) from exc
 

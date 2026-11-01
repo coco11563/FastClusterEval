@@ -20,10 +20,12 @@ class EvaluationResult:
     metrics: dict[str, float]
     backend: str
     seconds: float
+    evaluated: Any = None
 
     def to_dict(self) -> dict[str, Any]:
         d = asdict(self)
         d["labels"] = self.labels.tolist()
+        d.pop("evaluated", None)
         return d
 
 
@@ -111,5 +113,5 @@ def evaluate(x, y_true=None, *, seeds=(0, 1, 2), backend: Literal["reference", "
             evaluated = z.detach().cpu().numpy()
         m = metrics(y_true, pred, evaluated, device=device if backend != "reference" else None,
                      backend="cuda" if backend != "reference" else "cpu", si_block=si_block) if y_true is not None else {}
-        out.append(EvaluationResult(seed, pred, m, backend, time.perf_counter() - t0))
+        out.append(EvaluationResult(seed, pred, m, backend, time.perf_counter() - t0, evaluated))
     return out

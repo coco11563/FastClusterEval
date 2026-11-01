@@ -198,6 +198,42 @@ The resident service returns one dataset result for `/v1/evaluate` and a
 standard batch object for `/v1/evaluate_batch`. Undefined silhouette values are
 serialized as JSON `null`, never as non-standard `NaN`.
 
+### BioJev teacher-step API v2
+
+For a greedy teacher, register the dataset once and send only the new
+repetitions at each adaptive stage:
+
+```http
+POST /v1/datasets/register
+POST /v2/teacher/step/screen
+```
+
+The v2 request contains `views`, `selected_matrix_indices`, and optional
+per-view `seeds`. An audit view can contain `projections`; these are scored
+using the partition produced on the full audit view, so audit halves do not
+recluster independently:
+
+```json
+{
+  "dataset_id": "teacher:W008",
+  "views": {
+    "sel_0": {"row_indices": [0, 2, 4], "seeds": [0]},
+    "aud_0": {
+      "row_indices": [10, 11, 12], "seeds": [100],
+      "projections": {"h1": {"row_indices": [0, 2]}}
+    }
+  },
+  "selected_matrix_indices": {"P": [1, 4], "0": [1, 4, 9]},
+  "metrics": ["NMI", "ARI", "SI"],
+  "backend": "cuda_graph"
+}
+```
+
+`/v2/teacher/step/verify` uses the same schema for exact top-k or tie
+verification. The controller must send only new selection repetitions and send
+audit views once. The v2 endpoint reports per-view and per-panel timings and
+keeps the v1 endpoints for compatibility.
+
 ## Current remote GPU pool
 
 The services bind to localhost on each server. Use an SSH tunnel from the
