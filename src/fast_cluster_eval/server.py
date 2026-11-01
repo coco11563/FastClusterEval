@@ -7,7 +7,8 @@ import time
 from typing import Any
 
 from .batch import evaluate_batch
-from .io import request_from_dict
+from .io import DatasetInput, request_from_dict
+from .registry import DatasetRegistry
 
 
 def create_app(*, backend: str = "cuda_exact", device: str | None = None,
@@ -21,6 +22,7 @@ def create_app(*, backend: str = "cuda_exact", device: str | None = None,
 
     app = FastAPI(title="FastClusterEval", version="0.1.0")
     semaphore = asyncio.Semaphore(max_concurrency)
+    registry = DatasetRegistry()
     state = {"started_at": time.time(), "requests": 0, "active": 0}
 
     @app.on_event("startup")
@@ -38,6 +40,26 @@ def create_app(*, backend: str = "cuda_exact", device: str | None = None,
             "max_concurrency": max_concurrency, "requests": state["requests"],
             "active": state["active"],
         }
+
+    @app.post("/v1/datasets/register")
+    async def register_dataset(payload: dict[str, Any]):
+        try:
+            record = await asyncio.to_thread(registry.register, payload)
+            return registry.info(record.dataset_id)
+        except Exception as exc:
+            raise HTTPException(status_code=400, detail={"type": type(exc).__name__, "message": str(exc)}) from exc
+
+    @app.get("/v1/datasets/{dataset_id}")
+    async def dataset_info(dataset_id: str):
+        try:
+            return registry.info(dataset_id)
+        except Exception as exc:
+            raise HTTPException(status_code=404, detail={"type": type(exc).__name__, "message": str(exc)}) from exc
+
+    @app.delete("/v1/datasets/{dataset_id}")
+    async def unregister_dataset(dataset_id: str):
+        registry.unregister(dataset_id)
+        return {"status": "ok", "dataset_id": dataset_id}
 
     async def run(payload: dict[str, Any]):
         state["requests"] += 1
@@ -78,6 +100,43 @@ def create_app(*, backend: str = "cuda_exact", device: str | None = None,
                     )
                 finally:
                     state["active"] -= 1
+        except Exception as exc:
+            raise HTTPException(status_code=400, detail={"type": type(exc).__name__, "message": str(exc)}) from exc
+
+    @app.post("/v1/evaluate_teacher_step")
+    async def evaluate_teacher_step(payload: dict[str, Any]):
+        """Evaluate all panels on multiple resident D/A views in one request."""
+        try:
+            dataset_id = str(payload["dataset_id"])
+            panels = payload["selected_matrix_indices"]
+            views = payload.get("views") or {"full": {}}
+            results = {}
+            async with semaphore:
+                state["requests"] += len(views)
+                state["active"] += 1
+                try:
+                    for view_id, spec in views.items():
+                        rows = spec.get("row_indices") if isinstance(spec, dict) else spec
+                        matrix, truth = registry.view(dataset_id, rows)
+                        req = DatasetInput(
+                            dataset_id=f"{dataset_id}:{view_id}",
+                            matrix=matrix,
+                            truth_labels=truth,
+                            selected_matrix_indices=panels,
+                            metrics=tuple(payload.get("metrics", ("NMI", "ARI", "SI"))),
+                            seeds=tuple(int(x) for x in payload.get("seeds", (0, 1, 2))),
+                        )
+                        batch = await asyncio.to_thread(
+                            evaluate_batch, [req], backend=payload.get("backend", backend),
+                            device=payload.get("device", device), max_concurrency=1,
+                            block=int(payload.get("block", block)),
+                            si_block=int(payload.get("si_block", si_block)),
+                            cugraph_resolution=payload.get("cugraph_resolution"),
+                        )
+                        results[str(view_id)] = batch["datasets"][0]
+                finally:
+                    state["active"] -= 1
+            return {"dataset_id": dataset_id, "backend": payload.get("backend", backend), "views": results}
         except Exception as exc:
             raise HTTPException(status_code=400, detail={"type": type(exc).__name__, "message": str(exc)}) from exc
 
