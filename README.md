@@ -247,10 +247,12 @@ server.
 | `gpu17` | 8766 | A100 GPU0 | `cuda_exact` | 2 |
 | `gpu17` | 8767–8772 | A100 GPU1,2,3,4,5,7 | `cuda_graph` | 4 each |
 
-Use `cuda_graph` for high-throughput candidate screening. Its Leiden partition
-can differ from the CPU reference because GPU kNN ties and graph construction
-can differ. Send finalists to `cuda_exact` for NMI/ARI/SI values aligned with
-the reference evaluator. `cuda_cugraph` is an optional RAPIDS backend that
+Use `cuda_exact` for BioJev teacher decisions and final scores. It keeps the
+CPU reference Scanpy/Leiden partition and moves NMI/ARI/SI kernels to CUDA, so
+its results are reference-aligned. Use `cuda_graph` only for high-throughput
+candidate-screening experiments: its Leiden partition can differ from the CPU
+reference because GPU kNN ties and graph construction can differ. Send
+finalists to `cuda_exact` before creating teacher targets. `cuda_cugraph` is an optional RAPIDS backend that
 moves Leiden to GPU as well; it must pass a partition/metric parity report
 before being used for teacher targets.
 
