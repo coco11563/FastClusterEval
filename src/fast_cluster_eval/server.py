@@ -4,8 +4,14 @@ from __future__ import annotations
 
 import asyncio
 import hashlib
+import os
 import time
 from typing import Any
+
+# The reference protocol requires deterministic single-threaded numerical
+# kernels. Set these before importing numpy/Scanpy through .batch.
+for _var in ("OMP_NUM_THREADS", "MKL_NUM_THREADS", "OPENBLAS_NUM_THREADS", "NUMBA_NUM_THREADS", "NUMEXPR_NUM_THREADS"):
+    os.environ.setdefault(_var, "1")
 
 import numpy as np
 
