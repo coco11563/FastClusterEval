@@ -217,7 +217,8 @@ def create_app(*, backend: str = "cuda_exact", device: str | None = None,
                             metrics=requested_metrics,
                                 seeds=view_seeds,
                         ).panels().items():
-                            evaluated = evaluate(
+                            evaluated = await asyncio.to_thread(
+                                evaluate,
                                 matrix[:, indices], truth, seeds=view_seeds,
                                 backend=selected_backend,
                                 device=payload.get("device", device),
