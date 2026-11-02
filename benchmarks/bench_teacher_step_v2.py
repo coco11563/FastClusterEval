@@ -93,6 +93,7 @@ def _v2(client, dataset_id, panels, rows, audit_half, backend):
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--backend", choices=("reference", "cuda_exact", "cuda_graph"), default="reference")
+    parser.add_argument("--panel-concurrency", type=int, default=1)
     args = parser.parse_args()
     rng = np.random.default_rng(19)
     x = rng.poisson(2.0, size=(96, 12)).astype(float)
@@ -103,7 +104,8 @@ def main():
 
     def run(fn):
         device = "cuda" if args.backend != "reference" else "cpu"
-        client = TestClient(create_app(backend=args.backend, device=device))
+        client = TestClient(create_app(backend=args.backend, device=device,
+                                       panel_concurrency=args.panel_concurrency))
         register = client.post("/v1/datasets/register", json={
             "dataset_id": "bench", "matrix": x.tolist(), "truth_labels": y.tolist(),
         })

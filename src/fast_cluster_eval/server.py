@@ -38,7 +38,8 @@ def _metric_rows(results, metrics_requested):
 
 
 def create_app(*, backend: str = "cuda_exact", device: str | None = None,
-               max_concurrency: int = 1, block: int = 1024, si_block: int = 1024):
+               max_concurrency: int = 1, panel_concurrency: int = 1,
+               block: int = 1024, si_block: int = 1024):
     try:
         from fastapi import FastAPI, HTTPException
     except ImportError as exc:
@@ -48,6 +49,7 @@ def create_app(*, backend: str = "cuda_exact", device: str | None = None,
 
     app = FastAPI(title="FastClusterEval", version="0.1.0")
     semaphore = asyncio.Semaphore(max_concurrency)
+    panel_semaphore = asyncio.Semaphore(max(1, int(panel_concurrency)))
     registry = DatasetRegistry()
     state = {"started_at": time.time(), "requests": 0, "active": 0}
 
@@ -209,23 +211,32 @@ def create_app(*, backend: str = "cuda_exact", device: str | None = None,
                         view_seeds = tuple(int(x) for x in spec.get("seeds", seeds))
                         view_started = time.perf_counter()
                         panel_results = []
-                        for panel_id, indices in DatasetInput(
+                        panel_specs = list(DatasetInput(
                             dataset_id=f"{dataset_id}:{view_id}",
                             matrix=matrix,
-                                truth_labels=truth,
+                            truth_labels=truth,
                             selected_matrix_indices=panels,
                             metrics=requested_metrics,
-                                seeds=view_seeds,
-                        ).panels().items():
-                            evaluated = await asyncio.to_thread(
-                                evaluate,
-                                matrix[:, indices], truth, seeds=view_seeds,
-                                backend=selected_backend,
-                                device=payload.get("device", device),
-                                block=int(payload.get("block", block)),
-                                si_block=int(payload.get("si_block", si_block)),
-                                cugraph_resolution=payload.get("cugraph_resolution"),
-                            )
+                            seeds=view_seeds,
+                        ).panels().items())
+
+                        async def evaluate_panel(panel_id, indices):
+                            async with panel_semaphore:
+                                evaluated = await asyncio.to_thread(
+                                    evaluate,
+                                    matrix[:, indices], truth, seeds=view_seeds,
+                                    backend=selected_backend,
+                                    device=payload.get("device", device),
+                                    block=int(payload.get("block", block)),
+                                    si_block=int(payload.get("si_block", si_block)),
+                                    cugraph_resolution=payload.get("cugraph_resolution"),
+                                )
+                            return panel_id, indices, evaluated
+
+                        evaluated_panels = await asyncio.gather(
+                            *(evaluate_panel(panel_id, indices) for panel_id, indices in panel_specs)
+                        )
+                        for panel_id, indices, evaluated in evaluated_panels:
                             aggregate, seed_rows = _metric_rows(evaluated, requested_metrics)
                             projection_rows = {}
                             for projection_id, projection_spec in projections.items():
@@ -295,10 +306,12 @@ def main():
     ap.add_argument("--backend", choices=["reference", "cuda_exact", "cuda_graph", "cuda_cugraph", "cuda_proxy"], default="cuda_exact")
     ap.add_argument("--device", default=None)
     ap.add_argument("--max-concurrency", type=int, default=1)
+    ap.add_argument("--panel-concurrency", type=int, default=1)
     ap.add_argument("--block", type=int, default=1024)
     ap.add_argument("--si-block", type=int, default=1024)
     a = ap.parse_args()
     app = create_app(backend=a.backend, device=a.device, max_concurrency=a.max_concurrency,
+                     panel_concurrency=a.panel_concurrency,
                      block=a.block, si_block=a.si_block)
     uvicorn.run(app, host=a.host, port=a.port, workers=1)
 

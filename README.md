@@ -232,7 +232,9 @@ recluster independently:
 `/v2/teacher/step/verify` uses the same schema for exact top-k or tie
 verification. The controller must send only new selection repetitions and send
 audit views once. The v2 endpoint reports per-view and per-panel timings and
-keeps the v1 endpoints for compatibility.
+keeps the v1 endpoints for compatibility. Exact services may set
+`--panel-concurrency 2` or `4` after a local parity check; the GPU metric work
+is still guarded by the service's CUDA execution order.
 
 ## Current remote GPU pool
 
